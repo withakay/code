@@ -4642,7 +4642,15 @@ impl ChatWidget<'_> {
                 self.app_event_tx.send(AppEvent::ExitRequest);
             }
             EventMsg::TurnDiff(TurnDiffEvent { unified_diff }) => {
+                let suppress = std::env::var("CODE_SUPPRESS_TURN_DIFF")
+                    .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+                if suppress {
+                    tracing::info!("TurnDiffEvent suppressed by CODE_SUPPRESS_TURN_DIFF");
+                    return;
+                }
                 info!("TurnDiffEvent: {unified_diff}");
+                self.add_diff_output(unified_diff, event.order.as_ref());
             }
             EventMsg::BackgroundEvent(BackgroundEventEvent { message }) => {
                 info!("BackgroundEvent: {message}");
@@ -4844,8 +4852,17 @@ impl ChatWidget<'_> {
         });
     }
 
-    pub(crate) fn add_diff_output(&mut self, diff_output: String) {
-        self.history_push(history_cell::new_diff_output(diff_output.clone()));
+    pub(crate) fn add_diff_output(
+        &mut self,
+        diff_output: String,
+        order: Option<&codex_core::protocol::OrderMeta>,
+    ) {
+        let key = self.near_time_key_current_req(order);
+        let _ = self.history_insert_with_key_global(
+            Box::new(history_cell::new_diff_output(diff_output)),
+            key,
+        );
+        self.restore_reasoning_in_progress_if_streaming();
     }
 
     pub(crate) fn add_status_output(&mut self) {
