@@ -73,6 +73,45 @@ pub async fn discover_prompts_in_excluding(
     out
 }
 
+/// Parse a slash-style invocation like "/name args..." and, if it matches a
+/// known `CustomPrompt`, return that prompt's content with all instances of
+/// `$ARGUMENTS` replaced by the provided arguments. Returns `None` if the text
+/// is not a slash invocation or if no matching prompt exists.
+pub fn expand_prompt_invocation(text: &str, prompts: &[CustomPrompt]) -> Option<String> {
+    // Ignore any leading spaces before the slash.
+    let trimmed = text.trim_start_matches(' ');
+    let rest = trimmed.strip_prefix('/')?;
+
+    // Identify the command token (up to the first ASCII whitespace).
+    let mut name_len = 0usize;
+    for &byte in rest.as_bytes() {
+        if byte.is_ascii_whitespace() {
+            break;
+        }
+        name_len += 1;
+    }
+
+    let name = &rest[..name_len];
+    let args = if name_len >= rest.len() {
+        ""
+    } else {
+        let mut s = &rest[name_len..];
+        if let Some(first) = s.as_bytes().first() {
+            if first.is_ascii_whitespace() {
+                s = &s[1..];
+            }
+        }
+        s
+    };
+
+    let prompt = prompts.iter().find(|p| p.name == name)?;
+    if prompt.content.contains("$ARGUMENTS") {
+        Some(prompt.content.replace("$ARGUMENTS", args))
+    } else {
+        Some(prompt.content.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,5 +162,56 @@ mod tests {
         let found = discover_prompts_in(dir).await;
         let names: Vec<String> = found.into_iter().map(|e| e.name).collect();
         assert_eq!(names, vec!["good"]);
+    }
+
+    fn prompt(name: &str, content: &str) -> CustomPrompt {
+        CustomPrompt {
+            name: name.to_string(),
+            path: PathBuf::from(format!("/tmp/{name}.md")),
+            content: content.to_string(),
+        }
+    }
+
+    #[test]
+    fn expand_prompt_invocation_replaces_arguments() {
+        let prompts = vec![prompt("hello", "Hi $ARGUMENTS!")];
+        let expanded = expand_prompt_invocation("/hello world", &prompts)
+            .expect("should match prompt");
+        assert_eq!(expanded, "Hi world!");
+    }
+
+    #[test]
+    fn expand_prompt_invocation_handles_multiple_occurrences() {
+        let prompts = vec![prompt("echo", "A:$ARGUMENTS B:$ARGUMENTS")];
+        let expanded = expand_prompt_invocation("/echo foo bar", &prompts)
+            .expect("should match prompt");
+        assert_eq!(expanded, "A:foo bar B:foo bar");
+    }
+
+    #[test]
+    fn expand_prompt_invocation_allows_empty_arguments() {
+        let prompts = vec![prompt("hello", "<$ARGUMENTS>")];
+        let expanded = expand_prompt_invocation("/hello", &prompts).expect("should match");
+        assert_eq!(expanded, "<>");
+    }
+
+    #[test]
+    fn expand_prompt_invocation_returns_prompt_without_placeholder() {
+        let prompts = vec![prompt("hello", "Hi there!")];
+        let expanded = expand_prompt_invocation("/hello world", &prompts)
+            .expect("should match prompt");
+        assert_eq!(expanded, "Hi there!");
+    }
+
+    #[test]
+    fn expand_prompt_invocation_unknown_prompt_returns_none() {
+        let prompts = vec![prompt("hello", "Hi $ARGUMENTS!")];
+        assert!(expand_prompt_invocation("/goodbye world", &prompts).is_none());
+    }
+
+    #[test]
+    fn expand_prompt_invocation_ignores_non_slash_text() {
+        let prompts = vec![prompt("hello", "Hi $ARGUMENTS!")];
+        assert!(expand_prompt_invocation("hello world", &prompts).is_none());
     }
 }

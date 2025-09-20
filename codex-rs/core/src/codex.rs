@@ -1433,8 +1433,14 @@ impl Session {
         if is_apply_patch {
             let unified_diff = turn_diff_tracker.get_unified_diff();
             if let Ok(Some(unified_diff)) = unified_diff {
+                let diff_seq = seq_hint.map(|h| h.saturating_add(1));
+                let order = crate::protocol::OrderMeta {
+                    request_ordinal: attempt_req,
+                    output_index,
+                    sequence_number: diff_seq,
+                };
                 let msg = EventMsg::TurnDiff(TurnDiffEvent { unified_diff });
-                let event = self.make_event(sub_id, msg);
+                let event = self.make_event_with_order(sub_id, msg, order, diff_seq);
                 let _ = self.tx_event.send(event).await;
             }
         }

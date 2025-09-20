@@ -1505,7 +1505,7 @@ impl App<'_> {
                 }
                 AppEvent::DiffResult(text) => {
                     if let AppState::Chat { widget } = &mut self.app_state {
-                        widget.add_diff_output(text);
+                        widget.add_diff_output(text, None);
                     }
                 }
                 AppEvent::UpdateTheme(new_theme) => {
